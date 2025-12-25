@@ -1,0 +1,72 @@
+jobs:
+- job: PublishModules
+  displayName: 'Publish to Terraform Registry'
+  steps:
+  - script: |
+      echo "Publishing modules to Terraform Cloud..."
+      
+      # Configure git with GitHub token for authentication
+      git config --global user.email "pipeline@company.com"
+      git config --global user.name "Azure Pipeline"
+      git remote set-url origin https://$(GITHUB_TOKEN)@github.com/$(Build.Repository.Name).git
+      
+      # Get the latest version from git tags
+      echo "Fetching latest version from git tags..."
+      git fetch --tags
+      LATEST_TAG=$(git tag -l "v*" | sort -V | tail -n1)
+      
+      if [ -z "$LATEST_TAG" ]; then
+        # No previous tags, start with 0.0.1
+        CURRENT_MAJOR=0
+        CURRENT_MINOR=0
+        CURRENT_PATCH=1
+        echo "No previous tags found, starting with 0.0.1"
+      else
+        # Parse current version
+        CURRENT_VERSION=${LATEST_TAG#v}
+        CURRENT_MAJOR=$(echo $CURRENT_VERSION | cut -d. -f1)
+        CURRENT_MINOR=$(echo $CURRENT_VERSION | cut -d. -f2)
+        CURRENT_PATCH=$(echo $CURRENT_VERSION | cut -d. -f3)
+        echo "Current version: $CURRENT_VERSION (Major: $CURRENT_MAJOR, Minor: $CURRENT_MINOR, Patch: $CURRENT_PATCH)"
+      fi
+      
+      # Get PR approval message to determine version bump
+      echo "Checking PR approval message for version bump type..."
+      
+      # Get the merge commit message which contains PR info
+      MERGE_COMMIT_MSG="$(git log -1 --pretty=%B)"
+      echo "Merge commit message: $MERGE_COMMIT_MSG"
+      
+      # Determine version bump based on approval message
+      if echo "$MERGE_COMMIT_MSG" | grep -i "APPROVED MAJOR" > /dev/null; then
+        NEW_MAJOR=$((CURRENT_MAJOR + 1))
+        NEW_MINOR=0
+        NEW_PATCH=0
+        BUMP_TYPE="MAJOR"
+      elif echo "$MERGE_COMMIT_MSG" | grep -i "APPROVED MINOR" > /dev/null; then
+        NEW_MAJOR=$CURRENT_MAJOR
+        NEW_MINOR=$((CURRENT_MINOR + 1))
+        NEW_PATCH=0
+        BUMP_TYPE="MINOR"
+      else
+        # Default to PATCH if no specific approval message or "APPROVED PATCH"
+        NEW_MAJOR=$CURRENT_MAJOR
+        NEW_MINOR=$CURRENT_MINOR
+        NEW_PATCH=$((CURRENT_PATCH + 1))
+        BUMP_TYPE="PATCH"
+      fi
+      
+      VERSION="$NEW_MAJOR.$NEW_MINOR.$NEW_PATCH"
+      echo "Version bump type: $BUMP_TYPE"
+      echo "Publishing version: $VERSION"
+      
+      # Create git tag for this version
+      git tag -a "v$VERSION" -m "Automated release v$VERSION"
+      git push origin "v$VERSION"
+      
+      echo "✓ Modules published with version: v$VERSION"
+      echo "##vso[task.setvariable variable=PublishedVersion]v$VERSION"
+    displayName: 'Publish Modules'
+    env:
+      TF_CLOUD_TOKEN: $(apiKey)
+      GITHUB_TOKEN: $(GITHUB_TOKEN)

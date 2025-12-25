@@ -1,0 +1,39 @@
+parameters:
+- name: terraformVersion
+  type: string
+  default: '1.6.0'
+- name: examplePaths
+  type: object
+  default: []
+
+jobs:
+- job: TerraformPlan
+  displayName: 'Run Terraform Plan'
+  steps:
+  - task: TerraformInstaller@0
+    displayName: 'Install Terraform'
+    inputs:
+      terraformVersion: ${{ parameters.terraformVersion }}
+
+  - script: |
+      echo "Configuring Terraform Cloud authentication..."
+      mkdir -p ~/.terraform.d
+      echo "credentials \"app.terraform.io\" { token = \"$(apiKey)\" }" > ~/.terraform.d/credentials.tfrc.json
+    displayName: 'Configure Terraform Cloud'
+    env:
+      TF_CLOUD_TOKEN: $(apiKey)
+
+  - ${{ each path in parameters.examplePaths }}:
+    - script: |
+        echo "Testing module consumption pattern: ${{ path }}"
+        cd ${{ path }}
+        terraform init
+        terraform plan
+        echo "✓ Plan completed successfully for ${{ path }}"
+      displayName: 'Test Module Consumption - ${{ path }}'
+      env:
+        TF_CLOUD_TOKEN: $(apiKey)
+        ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+        ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET)
+        ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+        ARM_TENANT_ID: $(ARM_TENANT_ID)

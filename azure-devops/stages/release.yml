@@ -1,0 +1,12 @@
+parameters:
+- name: condition
+  type: boolean
+  default: true
+
+stages:
+- stage: Release
+  displayName: 'Publish Modules'
+  condition: ${{ parameters.condition }}
+  dependsOn: Test
+  jobs:
+  - template: ../jobs/terraform-release.yml
