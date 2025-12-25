@@ -1,0 +1,31 @@
+parameters:
+- name: terraformVersion
+  type: string
+  default: '1.6.0'
+- name: modulePaths
+  type: object
+  default: []
+
+jobs:
+- job: LintAndScan
+  displayName: 'Code Quality and Security'
+  steps:
+  - task: TerraformInstaller@0
+    displayName: 'Install Terraform'
+    inputs:
+      terraformVersion: ${{ parameters.terraformVersion }}
+
+  - script: |
+      echo "Installing security scanning tools..."
+      pip install checkov
+    displayName: 'Install Security Tools'
+
+  - ${{ each path in parameters.modulePaths }}:
+    - script: |
+        echo "Running security scanning and linting for ${{ path }}..."
+        cd ${{ path }}
+        terraform fmt -check
+        terraform validate
+        checkov -f . --framework terraform --quiet
+        echo "✓ All security and linting tests passed for ${{ path }}"
+      displayName: 'Security and Linting - ${{ path }}'

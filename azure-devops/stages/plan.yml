@@ -1,0 +1,21 @@
+parameters:
+- name: condition
+  type: boolean
+  default: true
+- name: terraformVersion
+  type: string
+  default: '1.6.0'
+- name: examplePaths
+  type: object
+  default: []
+
+stages:
+- stage: Plan
+  displayName: 'Terraform Plan'
+  condition: ${{ parameters.condition }}
+  dependsOn: CommitCheck
+  jobs:
+  - template: ../jobs/terraform-plan.yml
+    parameters:
+      terraformVersion: ${{ parameters.terraformVersion }}
+      examplePaths: ${{ parameters.examplePaths }}

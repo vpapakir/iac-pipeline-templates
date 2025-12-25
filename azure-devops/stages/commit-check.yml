@@ -1,0 +1,19 @@
+parameters:
+- name: condition
+  type: boolean
+  default: true
+- name: platformPrefix
+  type: string
+- name: excludePrefixes
+  type: object
+  default: []
+
+stages:
+- stage: CommitCheck
+  displayName: 'Commit Message Check'
+  condition: ${{ parameters.condition }}
+  jobs:
+  - template: ../jobs/commit-check.yml
+    parameters:
+      platformPrefix: ${{ parameters.platformPrefix }}
+      excludePrefixes: ${{ parameters.excludePrefixes }}

@@ -1,0 +1,12 @@
+parameters:
+- name: condition
+  type: boolean
+  default: true
+
+stages:
+- stage: CreatePR
+  displayName: 'Create Pull Request'
+  condition: ${{ parameters.condition }}
+  dependsOn: Test
+  jobs:
+  - template: ../jobs/create-pr.yml

@@ -1,0 +1,21 @@
+parameters:
+- name: condition
+  type: boolean
+  default: true
+- name: terraformVersion
+  type: string
+  default: '1.6.0'
+- name: modulePaths
+  type: object
+  default: []
+
+stages:
+- stage: Test
+  displayName: 'Security and Linting'
+  condition: ${{ parameters.condition }}
+  dependsOn: Plan
+  jobs:
+  - template: ../jobs/terraform-test.yml
+    parameters:
+      terraformVersion: ${{ parameters.terraformVersion }}
+      modulePaths: ${{ parameters.modulePaths }}
