@@ -20,12 +20,25 @@ jobs:
       pip install checkov
     displayName: 'Install Security Tools'
 
+  - script: |
+      echo "Configuring Terraform Cloud authentication..."
+      mkdir -p ~/.terraform.d
+      echo "credentials \"app.terraform.io\" { token = \"$(apiKey)\" }" > ~/.terraform.d/credentials.tfrc.json
+    displayName: 'Configure Terraform Cloud'
+
   - ${{ each path in parameters.modulePaths }}:
     - script: |
         echo "Running security scanning and linting for ${{ path }}..."
         cd ${{ path }}
+        terraform init
         terraform fmt -check
         terraform validate
         checkov -f . --framework terraform --quiet
         echo "✓ All security and linting tests passed for ${{ path }}"
       displayName: 'Security and Linting - ${{ path }}'
+      env:
+        TF_CLOUD_TOKEN: $(apiKey)
+        ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+        ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET)
+        ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+        ARM_TENANT_ID: $(ARM_TENANT_ID)
