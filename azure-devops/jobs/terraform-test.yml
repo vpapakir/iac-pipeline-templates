@@ -33,7 +33,7 @@ jobs:
         terraform init
         terraform fmt -check
         terraform validate
-        checkov -f . --framework terraform --quiet
+        checkov -d . --framework terraform --quiet
         echo "✓ All security and linting tests passed for ${{ path }}"
       displayName: 'Security and Linting - ${{ path }}'
       env:
