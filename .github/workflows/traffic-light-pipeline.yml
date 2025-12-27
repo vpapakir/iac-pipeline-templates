@@ -28,8 +28,14 @@ jobs:
     - name: Parse commit message
       id: check
       run: |
-        COMMIT_MSG="${{ github.event.head_commit.message }}"
-        echo "Commit message: $COMMIT_MSG"
+        # Get commit message based on event type
+        if [ "${{ github.event_name }}" = "pull_request" ]; then
+          COMMIT_MSG="${{ github.event.pull_request.title }}"
+          echo "PR Title: $COMMIT_MSG"
+        else
+          COMMIT_MSG="${{ github.event.head_commit.message }}"
+          echo "Commit message: $COMMIT_MSG"
+        fi
         
         # Check if this pipeline should run
         if [[ "$COMMIT_MSG" == *"[${{ inputs.ci-tool }}]"* ]]; then
