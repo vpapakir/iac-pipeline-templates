@@ -14,6 +14,8 @@ on:
         required: true
       github-token:
         required: true
+      civo-token:
+        required: false
 
 jobs:
   commit-check:
@@ -86,6 +88,8 @@ jobs:
       run: pip3 install checkov
     
     - name: Validate Terraform
+      env:
+        CIVO_TOKEN: ${{ secrets.civo-token }}
       run: |
         CLOUD_PROVIDER="${{ needs.commit-check.outputs.cloud-provider }}"
         echo "Validating $CLOUD_PROVIDER module..."
