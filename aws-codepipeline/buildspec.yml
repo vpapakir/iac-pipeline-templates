@@ -1,0 +1,181 @@
+version: 0.2
+
+phases:
+  install:
+    commands:
+      - echo "Installing Terraform and tools..."
+      - wget https://releases.hashicorp.com/terraform/1.6.0/terraform_1.6.0_linux_amd64.zip
+      - unzip terraform_1.6.0_linux_amd64.zip
+      - mv terraform /usr/local/bin/
+      - terraform --version
+      - pip3 install checkov
+      
+  pre_build:
+    commands:
+      - echo "Starting AWS CodePipeline build..."
+      - echo "Commit message - $CODEBUILD_SOURCE_VERSION"
+      - echo "Branch - $CODEBUILD_WEBHOOK_HEAD_REF"
+      
+  build:
+    commands:
+      - |
+        COMMIT_MSG=$(git log -1 --pretty=%B)
+        echo "Commit message: $COMMIT_MSG"
+        
+        # Check if this is AWS pipeline or default (no prefix)
+        if [[ "$COMMIT_MSG" == *"[aws]"* ]] || [[ "$COMMIT_MSG" != *"[ado]"* && "$COMMIT_MSG" != *"[gh]"* && "$COMMIT_MSG" != *"[oci]"* ]]; then
+          echo "✓ Pipeline should run for AWS CodePipeline"
+          
+          # Configure Terraform Cloud
+          echo "Configuring Terraform Cloud authentication..."
+          mkdir -p ~/.terraform.d
+          echo "credentials \"app.terraform.io\" { token = \"$TF_CLOUD_TOKEN\" }" > ~/.terraform.d/credentials.tfrc.json
+          
+          # PLAN STAGE - Test module consumption
+          echo "→ Running Plan stage..."
+          if [ -d "examples/aws-example" ]; then
+            cd examples/aws-example
+            terraform init
+            echo "--- AWS Example Plan ---"
+            terraform plan
+            echo "--- AWS Example Validation ---"
+            terraform validate
+            cd ../..
+          fi
+          
+          if [ -d "examples/azure-example" ]; then
+            cd examples/azure-example
+            terraform init
+            echo "--- Azure Example Validation ---"
+            terraform validate
+            cd ../..
+          fi
+          
+          # TEST STAGE - Security scanning and linting
+          echo "→ Running Test stage..."
+          
+          # Scan AWS modules if they exist
+          if [ -d "iac/terraform/aws" ]; then
+            cd iac/terraform/aws
+            terraform init
+            terraform fmt -check
+            terraform validate
+            checkov -d . --framework terraform
+            CHECKOV_EXIT_CODE=$?
+            if [ $CHECKOV_EXIT_CODE -ne 0 ]; then
+              echo "⚠️ Security scan found issues in AWS module"
+              exit 1
+            fi
+            cd ../../..
+          fi
+          
+          # Scan other cloud modules for validation only
+          for provider in azure civo oci; do
+            if [ -d "iac/terraform/$provider" ]; then
+              cd "iac/terraform/$provider"
+              terraform init
+              terraform fmt -check
+              terraform validate
+              cd ../../..
+            fi
+          done
+          
+          # CONDITIONAL STAGES
+          if [[ "$COMMIT_MSG" == *"[release]"* ]] && [[ "$CODEBUILD_WEBHOOK_HEAD_REF" != "refs/heads/main" ]]; then
+            echo "→ Creating PR (release flag + feature branch)"
+            
+            # Install GitHub CLI
+            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | gpg --dearmor -o /usr/share/keyrings/githubcli-archive-keyring.gpg
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+            apt update && apt install gh -y
+            
+            # Configure git and create PR
+            git config --global user.email "pipeline@company.com"
+            git config --global user.name "AWS CodeBuild"
+            echo "$GITHUB_TOKEN" | gh auth login --with-token
+            
+            # Determine target branch
+            if git show-ref --verify --quiet refs/remotes/origin/main; then
+              TARGET_BRANCH="main"
+            else
+              TARGET_BRANCH="master"
+            fi
+            
+            # Create PR
+            CURRENT_BRANCH=$(echo $CODEBUILD_WEBHOOK_HEAD_REF | sed 's|refs/heads/||')
+            PR_TITLE="Release: $(echo "$COMMIT_MSG" | head -n1 | sed 's/\[.*\]//g' | xargs)"
+            
+            gh pr create \
+              --title "$PR_TITLE" \
+              --body "Automated PR created by AWS CodePipeline
+
+            Commit: $COMMIT_MSG
+
+            Ready for review and release approval." \
+              --base "$TARGET_BRANCH" \
+              --head "$CURRENT_BRANCH"
+            
+            echo "✓ Pull request created successfully"
+            
+          elif [[ "$CODEBUILD_WEBHOOK_HEAD_REF" == "refs/heads/main" ]]; then
+            echo "→ Running Release stage (main branch)"
+            
+            # Configure git for tagging
+            git config --global user.email "pipeline@company.com"
+            git config --global user.name "AWS CodeBuild"
+            git remote set-url origin https://$GITHUB_TOKEN@github.com/$CODEBUILD_SOURCE_REPO_URL
+            
+            # Get latest version from git tags
+            git fetch --tags
+            LATEST_TAG=$(git tag -l "v*" | sort -V | tail -n1)
+            
+            if [ -z "$LATEST_TAG" ]; then
+              CURRENT_MAJOR=0
+              CURRENT_MINOR=0
+              CURRENT_PATCH=1
+            else
+              CURRENT_VERSION=${LATEST_TAG#v}
+              CURRENT_MAJOR=$(echo $CURRENT_VERSION | cut -d. -f1)
+              CURRENT_MINOR=$(echo $CURRENT_VERSION | cut -d. -f2)
+              CURRENT_PATCH=$(echo $CURRENT_VERSION | cut -d. -f3)
+            fi
+            
+            # Get PR approval message for version bump
+            MERGE_COMMIT_MSG="$(git log -1 --pretty=%B)"
+            
+            if echo "$MERGE_COMMIT_MSG" | grep -i "APPROVED MAJOR" > /dev/null; then
+              NEW_MAJOR=$((CURRENT_MAJOR + 1))
+              NEW_MINOR=0
+              NEW_PATCH=0
+            elif echo "$MERGE_COMMIT_MSG" | grep -i "APPROVED MINOR" > /dev/null; then
+              NEW_MAJOR=$CURRENT_MAJOR
+              NEW_MINOR=$((CURRENT_MINOR + 1))
+              NEW_PATCH=0
+            else
+              NEW_MAJOR=$CURRENT_MAJOR
+              NEW_MINOR=$CURRENT_MINOR
+              NEW_PATCH=$((CURRENT_PATCH + 1))
+            fi
+            
+            VERSION="$NEW_MAJOR.$NEW_MINOR.$NEW_PATCH"
+            echo "Publishing version: $VERSION"
+            
+            # Create git tag
+            git tag -a "v$VERSION" -m "Automated release v$VERSION"
+            git push origin "v$VERSION"
+            
+            echo "✓ Modules published with version: v$VERSION"
+          fi
+          
+        else
+          echo "ℹ Pipeline should not run for AWS - commit message: $COMMIT_MSG"
+          exit 0
+        fi
+        
+  post_build:
+    commands:
+      - echo "AWS CodePipeline build completed successfully!"
+
+artifacts:
+  files:
+    - '**/*'
