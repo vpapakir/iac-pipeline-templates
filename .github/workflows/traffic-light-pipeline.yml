@@ -1,0 +1,183 @@
+name: Traffic Light Pipeline
+
+on:
+  workflow_call:
+    inputs:
+      ci-tool:
+        required: true
+        type: string
+      default-cloud-provider:
+        required: true
+        type: string
+    secrets:
+      terraform-cloud-token:
+        required: true
+      github-token:
+        required: true
+
+jobs:
+  commit-check:
+    runs-on: ubuntu-latest
+    outputs:
+      should-run: ${{ steps.check.outputs.should-run }}
+      cloud-provider: ${{ steps.check.outputs.cloud-provider }}
+      is-release: ${{ steps.check.outputs.is-release }}
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Parse commit message
+      id: check
+      run: |
+        COMMIT_MSG="${{ github.event.head_commit.message }}"
+        echo "Commit message: $COMMIT_MSG"
+        
+        # Check if this pipeline should run
+        if [[ "$COMMIT_MSG" == *"[${{ inputs.ci-tool }}]"* ]]; then
+          echo "✅ ${{ inputs.ci-tool }} should handle this"
+          echo "should-run=true" >> $GITHUB_OUTPUT
+        else
+          echo "❌ Skipping - [${{ inputs.ci-tool }}] not found as CI tool"
+          echo "should-run=false" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+        
+        # Determine cloud provider
+        if [[ "$COMMIT_MSG" == *"[azure]"* ]]; then
+          CLOUD_PROVIDER="azure"
+        elif [[ "$COMMIT_MSG" == *"[aws]"* ]]; then
+          CLOUD_PROVIDER="aws"
+        elif [[ "$COMMIT_MSG" == *"[civo]"* ]]; then
+          CLOUD_PROVIDER="civo"
+        elif [[ "$COMMIT_MSG" == *"[oci]"* ]]; then
+          CLOUD_PROVIDER="oci"
+        else
+          CLOUD_PROVIDER="${{ inputs.default-cloud-provider }}"
+        fi
+        
+        echo "cloud-provider=$CLOUD_PROVIDER" >> $GITHUB_OUTPUT
+        
+        # Determine action
+        if [[ "$COMMIT_MSG" == *"[release]"* ]]; then
+          echo "is-release=true" >> $GITHUB_OUTPUT
+        else
+          echo "is-release=false" >> $GITHUB_OUTPUT
+        fi
+
+  build:
+    needs: commit-check
+    if: needs.commit-check.outputs.should-run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.6.0
+        cli_config_credentials_token: ${{ secrets.terraform-cloud-token }}
+    
+    - name: Install Checkov
+      run: pip3 install checkov
+    
+    - name: Validate Terraform
+      run: |
+        CLOUD_PROVIDER="${{ needs.commit-check.outputs.cloud-provider }}"
+        echo "Validating $CLOUD_PROVIDER module..."
+        
+        # Test example if exists
+        if [ -d "examples/${CLOUD_PROVIDER}-example" ]; then
+          cd "examples/${CLOUD_PROVIDER}-example"
+          terraform init && terraform plan && terraform validate
+          cd ../..
+        fi
+        
+        # Test module
+        if [ -d "iac/terraform/${CLOUD_PROVIDER}" ]; then
+          cd "iac/terraform/${CLOUD_PROVIDER}"
+          terraform init && terraform fmt -check && terraform validate
+          checkov -d . --framework terraform
+          cd ../../..
+        fi
+
+  create-pr:
+    needs: [commit-check, build]
+    if: needs.commit-check.outputs.is-release == 'true' && github.ref != 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Create Release PR
+      run: |
+        CLOUD_PROVIDER="${{ needs.commit-check.outputs.cloud-provider }}"
+        BRANCH_NAME="${{ github.ref_name }}"
+        
+        gh pr create \
+          --title "Release: ${CLOUD_PROVIDER} module updates" \
+          --body "Automated release PR
+
+        Approve with: [APPROVED] [PATCH] [${{ inputs.ci-tool }}]" \
+          --base main \
+          --head "$BRANCH_NAME"
+        
+        echo "✅ Release PR created"
+      env:
+        GITHUB_TOKEN: ${{ secrets.github-token }}
+
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Publish Module
+      run: |
+        MERGE_MSG="${{ github.event.head_commit.message }}"
+        echo "Merge message: $MERGE_MSG"
+        
+        # Check if this tool should publish
+        if [[ "$MERGE_MSG" != *"[${{ inputs.ci-tool }}]"* ]]; then
+          echo "❌ Skipping publish - not approved for ${{ inputs.ci-tool }}"
+          exit 0
+        fi
+        
+        echo "✅ Publishing module..."
+        
+        # Determine version bump
+        if [[ "$MERGE_MSG" == *"[MAJOR]"* ]]; then
+          BUMP_TYPE="major"
+        elif [[ "$MERGE_MSG" == *"[MINOR]"* ]]; then
+          BUMP_TYPE="minor"
+        else
+          BUMP_TYPE="patch"
+        fi
+        
+        # Get current version and bump
+        git fetch --tags
+        LATEST_TAG=$(git tag -l "v*" | sort -V | tail -n1)
+        
+        if [ -z "$LATEST_TAG" ]; then
+          NEW_VERSION="0.0.1"
+        else
+          CURRENT_VERSION=${LATEST_TAG#v}
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+          
+          case $BUMP_TYPE in
+            major) NEW_VERSION="$((MAJOR + 1)).0.0" ;;
+            minor) NEW_VERSION="$MAJOR.$((MINOR + 1)).0" ;;
+            patch) NEW_VERSION="$MAJOR.$MINOR.$((PATCH + 1))" ;;
+          esac
+        fi
+        
+        # Configure git
+        git config --global user.email "action@github.com"
+        git config --global user.name "${{ inputs.ci-tool }}"
+        
+        # Create and push tag
+        git tag -a "v$NEW_VERSION" -m "Release v$NEW_VERSION"
+        git push origin "v$NEW_VERSION"
+        
+        echo "🚀 Published version: v$NEW_VERSION"
+      env:
+        GITHUB_TOKEN: ${{ secrets.github-token }}
