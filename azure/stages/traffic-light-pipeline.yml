@@ -1,0 +1,190 @@
+parameters:
+- name: ciTool
+  type: string
+- name: defaultCloudProvider
+  type: string
+- name: terraformCloudToken
+  type: string
+- name: githubToken
+  type: string
+- name: azureCredentials
+  type: object
+
+stages:
+- stage: CommitCheck
+  jobs:
+  - job: ParseCommit
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - bash: |
+        COMMIT_MSG="$(Build.SourceVersionMessage)"
+        echo "Commit message: $COMMIT_MSG"
+        
+        # Check if this pipeline should run
+        if [[ "$COMMIT_MSG" != *"[${{ parameters.ciTool }}]"* ]]; then
+          echo "❌ Skipping - not ${{ parameters.ciTool }} job"
+          echo "##vso[task.complete result=Succeeded;]Pipeline skipped"
+          exit 0
+        fi
+        
+        echo "✅ ${{ parameters.ciTool }} should handle this"
+        echo "##vso[task.setvariable variable=shouldRun;isOutput=true]true"
+        
+        # Determine cloud provider
+        if [[ "$COMMIT_MSG" == *"[azure]"* ]]; then
+          CLOUD_PROVIDER="azure"
+        elif [[ "$COMMIT_MSG" == *"[aws]"* ]]; then
+          CLOUD_PROVIDER="aws"
+        elif [[ "$COMMIT_MSG" == *"[civo]"* ]]; then
+          CLOUD_PROVIDER="civo"
+        elif [[ "$COMMIT_MSG" == *"[oci]"* ]]; then
+          CLOUD_PROVIDER="oci"
+        else
+          CLOUD_PROVIDER="${{ parameters.defaultCloudProvider }}"
+        fi
+        
+        echo "##vso[task.setvariable variable=cloudProvider;isOutput=true]$CLOUD_PROVIDER"
+        
+        # Determine action
+        if [[ "$COMMIT_MSG" == *"[release]"* ]]; then
+          echo "##vso[task.setvariable variable=isRelease;isOutput=true]true"
+        else
+          echo "##vso[task.setvariable variable=isRelease;isOutput=true]false"
+        fi
+      name: commitCheck
+      displayName: 'Parse commit message'
+
+- stage: Build
+  condition: eq(dependencies.CommitCheck.outputs['ParseCommit.commitCheck.shouldRun'], 'true')
+  dependsOn: CommitCheck
+  variables:
+    cloudProvider: $[ dependencies.CommitCheck.outputs['ParseCommit.commitCheck.cloudProvider'] ]
+  jobs:
+  - job: Validate
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: TerraformInstaller@0
+      inputs:
+        terraformVersion: '1.6.0'
+    
+    - bash: |
+        # Configure Terraform Cloud
+        mkdir -p ~/.terraform.d
+        echo "credentials \"app.terraform.io\" { token = \"${{ parameters.terraformCloudToken }}\" }" > ~/.terraform.d/credentials.tfrc.json
+        
+        # Configure Azure authentication
+        export ARM_CLIENT_ID="${{ parameters.azureCredentials.clientId }}"
+        export ARM_CLIENT_SECRET="${{ parameters.azureCredentials.clientSecret }}"
+        export ARM_SUBSCRIPTION_ID="${{ parameters.azureCredentials.subscriptionId }}"
+        export ARM_TENANT_ID="${{ parameters.azureCredentials.tenantId }}"
+        
+        CLOUD_PROVIDER="$(cloudProvider)"
+        if [ -z "$CLOUD_PROVIDER" ]; then
+          CLOUD_PROVIDER="${{ parameters.defaultCloudProvider }}"
+        fi
+        
+        echo "Validating $CLOUD_PROVIDER module..."
+        
+        # Test example if exists
+        if [ -d "examples/${CLOUD_PROVIDER}-example" ]; then
+          cd "examples/${CLOUD_PROVIDER}-example"
+          terraform init && terraform plan && terraform validate
+          cd ../..
+        fi
+        
+        # Test module
+        if [ -d "iac/terraform/${CLOUD_PROVIDER}" ]; then
+          cd "iac/terraform/${CLOUD_PROVIDER}"
+          terraform init && terraform fmt -check && terraform validate
+          pip3 install checkov
+          checkov -d . --framework terraform
+          cd ../../..
+        fi
+      displayName: 'Validate Terraform'
+
+- stage: CreatePR
+  condition: and(succeeded(), eq(dependencies.CommitCheck.outputs['ParseCommit.commitCheck.isRelease'], 'true'), ne(variables['Build.SourceBranch'], 'refs/heads/main'))
+  dependsOn: [CommitCheck, Build]
+  variables:
+    cloudProvider: $[ dependencies.CommitCheck.outputs['ParseCommit.commitCheck.cloudProvider'] ]
+  jobs:
+  - job: CreatePullRequest
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - bash: |
+        CLOUD_PROVIDER="$(cloudProvider)"
+        BRANCH_NAME=$(echo "$(Build.SourceBranch)" | sed 's|refs/heads/||')
+        
+        echo "${{ parameters.githubToken }}" | gh auth login --with-token
+        
+        gh pr create \
+          --title "Release: ${CLOUD_PROVIDER} module updates" \
+          --body "Automated release PR
+
+        Approve with: [APPROVED] [PATCH] [${{ parameters.ciTool }}]" \
+          --base main \
+          --head "$BRANCH_NAME"
+        
+        echo "✅ Release PR created"
+      displayName: 'Create Release PR'
+
+- stage: Publish
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+  dependsOn: CommitCheck
+  jobs:
+  - job: PublishModule
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - bash: |
+        MERGE_MSG="$(Build.SourceVersionMessage)"
+        echo "Merge message: $MERGE_MSG"
+        
+        # Check if this tool should publish
+        if [[ "$MERGE_MSG" != *"[${{ parameters.ciTool }}]"* ]]; then
+          echo "❌ Skipping publish - not approved for ${{ parameters.ciTool }}"
+          exit 0
+        fi
+        
+        echo "✅ Publishing module..."
+        
+        # Determine version bump
+        if [[ "$MERGE_MSG" == *"[MAJOR]"* ]]; then
+          BUMP_TYPE="major"
+        elif [[ "$MERGE_MSG" == *"[MINOR]"* ]]; then
+          BUMP_TYPE="minor"
+        else
+          BUMP_TYPE="patch"
+        fi
+        
+        # Get current version and bump
+        git fetch --tags
+        LATEST_TAG=$(git tag -l "v*" | sort -V | tail -n1)
+        
+        if [ -z "$LATEST_TAG" ]; then
+          NEW_VERSION="0.0.1"
+        else
+          CURRENT_VERSION=${LATEST_TAG#v}
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+          
+          case $BUMP_TYPE in
+            major) NEW_VERSION="$((MAJOR + 1)).0.0" ;;
+            minor) NEW_VERSION="$MAJOR.$((MINOR + 1)).0" ;;
+            patch) NEW_VERSION="$MAJOR.$MINOR.$((PATCH + 1))" ;;
+          esac
+        fi
+        
+        # Configure git
+        git config --global user.email "pipeline@company.com"
+        git config --global user.name "${{ parameters.ciTool }}"
+        
+        # Create and push tag
+        git tag -a "v$NEW_VERSION" -m "Release v$NEW_VERSION"
+        git remote set-url origin https://${{ parameters.githubToken }}@github.com/$(Build.Repository.Name).git
+        git push origin "v$NEW_VERSION"
+        
+        echo "🚀 Published version: v$NEW_VERSION"
+      displayName: 'Publish Module'

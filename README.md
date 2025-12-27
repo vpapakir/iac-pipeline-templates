@@ -1,68 +1,73 @@
 # iac-pipeline-templates
 
-Centralized CI/CD pipeline templates for cloud-agnostic infrastructure automation following the atom-molecule-template architecture pattern.
+Centralized CI/CD pipeline templates implementing the **traffic light system** for cloud-agnostic infrastructure automation across multiple CI/CD platforms.
 
 ## Overview
 
-This repository provides reusable pipeline templates that implement standardized plan-test-release workflows across multiple CI/CD platforms. These templates are designed to be consumed by infrastructure modules (atoms and molecules) to ensure consistent automation practices organization-wide.
+This repository provides reusable pipeline templates that implement standardized plan-test-release workflows with intelligent platform routing. The **traffic light system** ensures only the intended CI tool runs for each commit, preventing pipeline conflicts and resource waste.
 
-## Architecture Philosophy
+## Traffic Light System
 
-### Template-Based Reusability
-- **Single Source of Truth**: All pipeline logic centralized in one repository
-- **Consistent Workflows**: Identical plan-test-release patterns across all infrastructure modules
-- **Parameterized Configuration**: Module-specific settings without duplicating pipeline logic
-- **Version Control**: Template updates propagate to all consuming modules
+### Commit Message Convention
+All commits must follow this format to control which CI/CD platform executes:
+```
+[repo] [cloud] [ci-tool] [action] <description>
+```
 
-### Multi-Platform Support
-- **Azure DevOps** - Primary implementation with full feature set
-- **GitHub Actions** - Mirror of Azure DevOps functionality
-- **AWS CodePipeline** - CloudFormation-based pipeline templates
-- **Oracle Cloud DevOps** - OCI DevOps build specifications
+**Components:**
+- `[repo]`: Repository platform - `[github]` (future: `[gitlab]`, `[bitbucket]`)
+- `[cloud]`: Target cloud provider - `[azure]`, `[aws]`, `[civo]`, `[oci]`
+- `[ci-tool]`: CI/CD platform - `[ado]`, `[gh_actions]`, `[aws_pipeline]`, `[oci_pipeline]`
+- `[action]`: Pipeline action - `[build]`, `[release]`
 
-## Supported Workflows
+**Examples:**
+```bash
+# Azure DevOps builds Azure module
+git commit -m "[github] [azure] [ado] [build] fix: update VM sizes"
 
-### Plan-Test-Release Pipeline
-1. **Commit Check** - Platform filtering based on commit message prefixes
-2. **Plan** - Terraform module consumption testing using example configurations
-3. **Test** - Security scanning (Checkov) and code quality validation
-4. **Create PR** - Automated pull request creation for release workflows
-5. **Release** - Intelligent semantic versioning and module publishing
+# GitHub Actions builds AWS module  
+git commit -m "[github] [aws] [gh_actions] [build] feat: add instance types"
 
-### Intelligent Features
-- **Commit Message Routing**: `[ado]`, `[gh]`, `[aws]`, `[oci]` prefixes control platform execution
-- **Conditional Stages**: PR creation only with `[release]` flag on feature branches
-- **Semantic Versioning**: Reviewer-controlled version bumps via approval messages
-- **Multi-Cloud Testing**: Validates modules across Azure, AWS, Civo, and OCI
+# AWS CodePipeline creates release PR
+git commit -m "[github] [aws] [aws_pipeline] [release] feat: ready for release"
+```
+
+### Pipeline Execution Matrix
+| Commit Message | Azure DevOps | GitHub Actions | AWS CodePipeline | OCI DevOps |
+|---|---|---|---|---|
+| `[github] [azure] [ado] [build]` | ✅ Run | ❌ Skip | ❌ Skip | ❌ Skip |
+| `[github] [aws] [gh_actions] [release]` | ❌ Skip | ✅ Run | ❌ Skip | ❌ Skip |
+| `[github] [civo] [aws_pipeline] [build]` | ❌ Skip | ❌ Skip | ✅ Run | ❌ Skip |
+| `[github] [oci] [oci_pipeline] [release]` | ❌ Skip | ❌ Skip | ❌ Skip | ✅ Run |
 
 ## Repository Structure
 
 ```
 iac-pipeline-templates/
-├── azure-devops/              # Azure DevOps pipeline templates
-│   ├── stages/                # Stage-level templates
-│   │   ├── commit-check.yml   # Platform filtering logic
-│   │   ├── plan.yml           # Module consumption testing
-│   │   ├── test.yml           # Security scanning & linting
-│   │   ├── create-pr.yml      # Automated PR creation
-│   │   └── release.yml        # Intelligent versioning & publishing
-│   └── jobs/                  # Job-level templates
-│       ├── commit-check.yml   # Commit message parsing
-│       ├── terraform-plan.yml # Terraform plan execution
-│       ├── terraform-test.yml # Security & quality checks
-│       ├── create-pr.yml      # GitHub PR creation
-│       └── terraform-release.yml # Version management & tagging
-├── github-actions/            # GitHub Actions workflow templates (future)
-├── aws-codepipeline/          # AWS CodePipeline templates (future)
-├── oracle-devops/             # Oracle Cloud DevOps templates (future)
+├── azure/stages/
+│   └── traffic-light-pipeline.yml    # Azure DevOps template
+├── .github/workflows/
+│   └── traffic-light-pipeline.yml    # GitHub Actions reusable workflow
+├── aws/scripts/
+│   └── traffic-light-pipeline.sh     # AWS CodeBuild script
+├── oci/scripts/
+│   └── traffic-light-pipeline.sh     # OCI DevOps script
 └── README.md
 ```
 
-## Usage
+## Template Features
 
-### Azure DevOps Integration
+### Azure DevOps Template
+**File:** `azure/stages/traffic-light-pipeline.yml`
 
-#### 1. Reference Templates Repository
+**Parameters:**
+- `ciTool` - CI tool identifier (e.g., "ado")
+- `defaultCloudProvider` - Default cloud when not specified
+- `terraformCloudToken` - Terraform Cloud API token
+- `githubToken` - GitHub token for PR creation
+- `azureCredentials` - Azure authentication object
+
+**Usage:**
 ```yaml
 # .azure/pipeline.yml
 resources:
@@ -70,205 +75,245 @@ resources:
   - repository: templates
     type: github
     name: vpapakir/iac-pipeline-templates
-    ref: main
-```
-
-#### 2. Consume Stage Templates
-```yaml
-stages:
-- template: azure-devops/stages/plan.yml@templates
-  parameters:
-    condition: eq(variables.shouldRun, true)
-    terraformVersion: '1.6.0'
-    examplePaths: 
-      - 'examples/my-module-example'
-
-- template: azure-devops/stages/test.yml@templates
-  parameters:
-    condition: eq(variables.shouldRun, true)
-    terraformVersion: '1.6.0'
-    modulePaths:
-      - 'iac/terraform/aws'
-      - 'iac/terraform/azure'
-```
-
-#### 3. Configure Module-Specific Variables
-```yaml
-variables:
-  terraformVersion: '1.6.0'
-  shouldRun: $[or(contains(variables['Build.SourceVersionMessage'], '[ado]'), not(or(contains(variables['Build.SourceVersionMessage'], '[gh]'), contains(variables['Build.SourceVersionMessage'], '[aws]'))))]
-  shouldCreatePR: $[and(contains(variables['Build.SourceVersionMessage'], '[release]'), ne(variables['Build.SourceBranch'], 'refs/heads/main'))]
-  shouldRelease: $[or(eq(variables['Build.SourceBranch'], 'refs/heads/main'), eq(variables['Build.SourceBranch'], 'refs/heads/master'))]
-```
-
-### Complete Example
-
-```yaml
-# Infrastructure module: .azure/pipeline.yml
-trigger:
-  branches:
-    include: [main, master]
-  paths:
-    exclude: [README.md, .github/*, .aws/*]
-
-pool:
-  vmImage: 'ubuntu-latest'
-
-variables:
-  terraformVersion: '1.6.0'
-  shouldRun: $[or(contains(variables['Build.SourceVersionMessage'], '[ado]'), not(or(contains(variables['Build.SourceVersionMessage'], '[gh]'), contains(variables['Build.SourceVersionMessage'], '[aws]'))))]
-  shouldCreatePR: $[and(contains(variables['Build.SourceVersionMessage'], '[release]'), ne(variables['Build.SourceBranch'], 'refs/heads/main'))]
-  shouldRelease: $[or(eq(variables['Build.SourceBranch'], 'refs/heads/main'), eq(variables['Build.SourceBranch'], 'refs/heads/master'))]
-
-resources:
-  repositories:
-  - repository: templates
-    type: github
-    name: vpapakir/iac-pipeline-templates
-    ref: main
+    ref: refs/heads/main
+    endpoint: github
 
 stages:
-- template: azure-devops/stages/commit-check.yml@templates
+- template: azure/stages/traffic-light-pipeline.yml@templates
   parameters:
-    condition: true
-    platformPrefix: '[ado]'
-    excludePrefixes: ['[gh]', '[aws]']
-
-- template: azure-devops/stages/plan.yml@templates
-  parameters:
-    condition: eq(variables.shouldRun, true)
-    terraformVersion: $(terraformVersion)
-    examplePaths: ['examples/compute-example']
-
-- template: azure-devops/stages/test.yml@templates
-  parameters:
-    condition: eq(variables.shouldRun, true)
-    terraformVersion: $(terraformVersion)
-    modulePaths: ['iac/terraform/azure', 'iac/terraform/aws']
-
-- template: azure-devops/stages/create-pr.yml@templates
-  parameters:
-    condition: and(succeeded(), eq(variables.shouldCreatePR, true))
-
-- template: azure-devops/stages/release.yml@templates
-  parameters:
-    condition: and(succeeded(), eq(variables.shouldRelease, true))
+    ciTool: 'ado'
+    defaultCloudProvider: 'azure'
+    terraformCloudToken: $(apiKey)
+    githubToken: $(GITHUB_TOKEN)
+    azureCredentials:
+      clientId: $(ARM_CLIENT_ID)
+      clientSecret: $(ARM_CLIENT_SECRET)
+      subscriptionId: $(ARM_SUBSCRIPTION_ID)
+      tenantId: $(ARM_TENANT_ID)
 ```
 
-## Template Parameters
+### GitHub Actions Workflow
+**File:** `.github/workflows/traffic-light-pipeline.yml`
 
-### Stage Templates
+**Inputs:**
+- `ci-tool` - CI tool identifier (e.g., "gh_actions")
+- `default-cloud-provider` - Default cloud provider
 
-#### commit-check.yml
-- `condition` (boolean) - Whether to run the stage
-- `platformPrefix` (string) - Platform identifier (e.g., '[ado]')
-- `excludePrefixes` (array) - Other platform prefixes to exclude
+**Secrets:**
+- `terraform-cloud-token` - Terraform Cloud API token
+- `github-token` - GitHub token (auto-provided)
 
-#### plan.yml
-- `condition` (boolean) - Whether to run the stage
-- `terraformVersion` (string) - Terraform version to install
-- `examplePaths` (array) - Paths to example configurations for testing
+**Usage:**
+```yaml
+# .github/workflows/pipeline.yml
+name: Infrastructure Pipeline
 
-#### test.yml
-- `condition` (boolean) - Whether to run the stage
-- `terraformVersion` (string) - Terraform version to install
-- `modulePaths` (array) - Paths to Terraform modules for scanning
+on:
+  push:
+    branches: ['*']
+  pull_request:
+    branches: [main]
 
-#### create-pr.yml
-- `condition` (boolean) - Whether to run the stage
-
-#### release.yml
-- `condition` (boolean) - Whether to run the stage
-
-## Required Variable Groups
-
-### Azure DevOps
-- **terraform** Variable Group:
-  - `apiKey` - Terraform Cloud API token
-- **shared** Variable Group:
-  - `ARM_CLIENT_ID` - Azure Service Principal ID
-  - `ARM_CLIENT_SECRET` - Azure Service Principal Secret
-  - `ARM_SUBSCRIPTION_ID` - Azure Subscription ID
-  - `ARM_TENANT_ID` - Azure Tenant ID
-  - `GITHUB_TOKEN` - GitHub Personal Access Token
-
-## Commit Message Conventions
-
-Control pipeline execution using commit message prefixes:
-
-```bash
-# Platform-specific execution
-git commit -m "[ado] feat: add new feature"     # Azure DevOps only
-git commit -m "[gh] fix: bug fix"               # GitHub Actions only
-git commit -m "[aws] chore: update config"      # AWS CodePipeline only
-git commit -m "[oci] docs: update docs"         # Oracle Cloud DevOps only
-
-# Release workflow
-git commit -m "[ado][release] feat: ready for release"  # Creates PR
-git commit -m "fix: bug fix"                            # Default (Azure DevOps)
+jobs:
+  traffic-light-pipeline:
+    uses: vpapakir/iac-pipeline-templates/.github/workflows/traffic-light-pipeline.yml@main
+    with:
+      ci-tool: 'gh_actions'
+      default-cloud-provider: 'aws'
+    secrets:
+      terraform-cloud-token: ${{ secrets.TF_CLOUD_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
+
+### AWS CodeBuild Script
+**File:** `aws/scripts/traffic-light-pipeline.sh`
+
+**Parameters:**
+- `--ci-tool` - CI tool identifier
+- `--default-cloud-provider` - Default cloud provider
+- `--terraform-cloud-token` - Terraform Cloud token
+- `--github-token` - GitHub token
+- `--commit-sha` - Commit SHA for GitHub API
+- `--branch-ref` - Branch reference
+- `--repo-name` - Repository name
+
+**Usage:**
+```yaml
+# buildspec.yml
+version: 0.2
+
+phases:
+  build:
+    commands:
+      - |
+        curl -H "Authorization: token $GITHUB_TOKEN" \
+          -H "Accept: application/vnd.github.v3.raw" \
+          -o pipeline.sh \
+          https://api.github.com/repos/vpapakir/iac-pipeline-templates/contents/aws/scripts/traffic-light-pipeline.sh
+        
+        chmod +x pipeline.sh
+        
+        ./pipeline.sh \
+          --ci-tool "aws_pipeline" \
+          --default-cloud-provider "aws" \
+          --terraform-cloud-token "$TF_CLOUD_TOKEN" \
+          --github-token "$GITHUB_TOKEN" \
+          --commit-sha "$CODEBUILD_RESOLVED_SOURCE_VERSION" \
+          --branch-ref "$CODEBUILD_WEBHOOK_HEAD_REF" \
+          --repo-name "vpapakir/iac-molecule-compute"
+```
+
+### OCI DevOps Script
+**File:** `oci/scripts/traffic-light-pipeline.sh`
+
+**Parameters:** Same as AWS script
+
+**Usage:**
+```yaml
+# .oci/build_spec.yaml
+version: 0.1
+component: build
+
+steps:
+  - type: Command
+    name: "Execute Traffic Light Pipeline"
+    command: |
+      curl -H "Authorization: token $GITHUB_TOKEN" \
+        -o pipeline.sh \
+        https://api.github.com/repos/vpapakir/iac-pipeline-templates/contents/oci/scripts/traffic-light-pipeline.sh
+      
+      chmod +x pipeline.sh
+      
+      ./pipeline.sh \
+        --ci-tool "oci_pipeline" \
+        --default-cloud-provider "oci" \
+        --terraform-cloud-token "$TF_CLOUD_TOKEN" \
+        --github-token "$GITHUB_TOKEN" \
+        --commit-sha "$OCI_BUILD_COMMIT_HASH" \
+        --branch-ref "$OCI_BUILD_GIT_BRANCH" \
+        --repo-name "vpapakir/iac-molecule-compute"
+```
+
+## Pipeline Stages
+
+### 1. Commit Check
+- Parses commit message for CI tool identifier
+- Skips execution if wrong CI tool
+- Determines target cloud provider
+- Sets variables for subsequent stages
+
+### 2. Build & Validate
+- Installs Terraform and dependencies
+- Configures Terraform Cloud authentication
+- Tests example configurations (terraform plan)
+- Validates module code (terraform validate, fmt)
+- Runs security scanning (Checkov)
+
+### 3. Create PR (Conditional)
+- **Trigger:** `[release]` in commit message + not on main branch
+- Creates automated pull request to main branch
+- Includes approval template with version control
+
+### 4. Publish (Conditional)
+- **Trigger:** Pipeline runs on main/master branch
+- Parses PR approval message for version bump
+- Creates semantic version tag
+- Publishes module to registry
 
 ## Semantic Versioning
 
-Intelligent version management based on PR approval messages:
+### PR Approval Format
+```
+[APPROVED] [VERSION_BUMP] [ci-tool] <description>
+```
 
-### Version Bump Logic
-- **APPROVED MAJOR** → Major version bump (1.0.0 → 2.0.0)
-- **APPROVED MINOR** → Minor version bump (1.0.0 → 1.1.0)
-- **APPROVED PATCH** or default → Patch version bump (1.0.0 → 1.0.1)
+**Examples:**
+```bash
+# Patch version bump via Azure DevOps
+"[APPROVED] [PATCH] [ado] looks good to go"
 
-### Workflow Example
-1. Developer: `git commit -m "[ado][release] feat: new cloud provider"`
-2. Pipeline creates PR automatically
-3. Reviewer approves with: "APPROVED MINOR - adds OCI support"
-4. PR merge triggers release pipeline
-5. Pipeline creates version 1.1.0 and publishes to Terraform Cloud
+# Minor version bump via GitHub Actions  
+"[APPROVED] [MINOR] [gh_actions] new features added"
+
+# Major version bump via AWS CodePipeline
+"[APPROVED] [MAJOR] [aws_pipeline] breaking changes"
+```
+
+### Version Logic
+- `[MAJOR]` → Major version bump (1.0.0 → 2.0.0)
+- `[MINOR]` → Minor version bump (1.0.0 → 1.1.0)
+- `[PATCH]` or default → Patch version bump (1.0.0 → 1.0.1)
+
+## Required Environment Variables
+
+### Azure DevOps Variable Groups
+**`terraform` Variable Group:**
+- `apiKey` - Terraform Cloud API token
+
+**`shared` Variable Group:**
+- `ARM_CLIENT_ID` - Azure Service Principal ID
+- `ARM_CLIENT_SECRET` - Azure Service Principal Secret
+- `ARM_SUBSCRIPTION_ID` - Azure Subscription ID
+- `ARM_TENANT_ID` - Azure Tenant ID
+- `GITHUB_TOKEN` - GitHub Personal Access Token
+
+### GitHub Actions Secrets
+- `TF_CLOUD_TOKEN` - Terraform Cloud API token
+- `GITHUB_TOKEN` - Automatically provided by GitHub Actions
+
+### AWS CodeBuild Environment Variables
+- `TF_CLOUD_TOKEN` - Terraform Cloud API token (Plaintext)
+- `GITHUB_TOKEN` - GitHub Personal Access Token
+
+### OCI DevOps Parameters
+- `TF_CLOUD_TOKEN` - Terraform Cloud API token
+- `GITHUB_TOKEN` - GitHub Personal Access Token
 
 ## Development Workflow
 
-### For Infrastructure Module Developers
-1. **Setup**: Reference this template repository in your pipeline
-2. **Configure**: Set module-specific paths and parameters
-3. **Develop**: Work on feature branches with standard commits
-4. **Release**: Add `[release]` flag when ready for publication
-5. **Review**: Team reviews auto-created PR and controls version bump
+### 1. Development Testing
+```bash
+git commit -m "[github] [aws] [gh_actions] [build] fix: update security groups"
+```
+- Only GitHub Actions runs
+- Validates AWS module
+- No PR creation
 
-### For Template Maintainers
-1. **Update**: Modify templates in this repository
-2. **Version**: Tag releases for consuming modules to reference
-3. **Test**: Validate changes across multiple infrastructure modules
-4. **Document**: Update README and parameter documentation
+### 2. Release Creation
+```bash
+git commit -m "[github] [aws] [gh_actions] [release] feat: new compute features"
+```
+- GitHub Actions runs validation
+- Creates automated PR to main branch
+- Waits for team review
+
+### 3. Release Approval
+```bash
+# In GitHub PR comment/approval
+"[APPROVED] [MINOR] [gh_actions] new features look good"
+```
+- PR merge triggers GitHub Actions on main
+- Creates version 1.1.0 tag
+- Publishes module to registry
 
 ## Benefits
 
-### For Development Teams
-- **Consistency**: Same workflow across all infrastructure modules
-- **Efficiency**: No pipeline code duplication or maintenance
-- **Quality**: Built-in security scanning and code quality checks
-- **Automation**: Intelligent versioning and release management
-
-### For Platform Teams
-- **Governance**: Centralized control over CI/CD standards
-- **Scalability**: Easy to onboard new infrastructure modules
-- **Maintenance**: Single point of updates for all pipelines
-- **Compliance**: Consistent security and quality gates
-
-## Future Enhancements
-
-- **GitHub Actions Templates**: Complete GitHub Actions workflow templates
-- **AWS CodePipeline Templates**: CloudFormation-based pipeline templates
-- **Oracle Cloud DevOps Templates**: OCI DevOps build specifications
-- **Policy Integration**: Policy-as-code validation stages
-- **Cost Analysis**: Automated cost estimation and optimization
-- **Multi-Environment**: Environment-specific deployment templates
+✅ **No Pipeline Conflicts** - Only one CI tool runs per commit  
+✅ **Resource Efficiency** - Eliminates redundant pipeline executions  
+✅ **Clear Intent** - Commit message explicitly states execution plan  
+✅ **Flexible Publishing** - Choose which CI tool publishes final module  
+✅ **Multi-Cloud Support** - Test different providers in different CI environments  
+✅ **Centralized Maintenance** - Update templates to update all projects  
+✅ **Consistent Behavior** - Same logic across all CI platforms  
 
 ## Contributing
 
-1. **Fork** this repository
-2. **Create** feature branch for template updates
-3. **Test** changes with existing infrastructure modules
-4. **Document** parameter changes and new features
-5. **Submit** pull request with detailed description
+When contributing to templates:
+
+1. **Test Changes** - Validate across multiple infrastructure projects
+2. **Version Updates** - Tag releases for consuming projects to reference
+3. **Documentation** - Update this README for any parameter changes
+4. **Backward Compatibility** - Maintain existing parameter interfaces
 
 ## License
 
