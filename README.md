@@ -46,7 +46,7 @@ git commit -m "[github] [aws] [aws_pipeline] [release] feat: ready for release"
 iac-pipeline-templates/
 ├── .github/workflows/
 │   ├── traffic-light-pipeline.yml    # GitHub Actions reusable workflow
-│   ├── sanity-check.yml              # Automated code quality checks
+│   ├── sanity-check.yml              # Weekly code quality checks
 │   └── reusable-sanity-check.yml     # Reusable sanity check workflow
 ├── azure/stages/
 │   └── traffic-light-pipeline.yml    # Azure DevOps template
@@ -63,7 +63,7 @@ iac-pipeline-templates/
 Standardized plan-test-release workflows with intelligent platform routing.
 
 ### Automated Code Quality
-Weekly sanity checks with automated formatting, linting, and security analysis.
+Weekly code quality checks with YAML, Markdown, and Shell script linting.
 
 ### Azure DevOps Template
 **File:** `azure/stages/traffic-light-pipeline.yml`
