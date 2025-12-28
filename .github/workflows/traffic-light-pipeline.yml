@@ -97,14 +97,14 @@ jobs:
         # Test example if exists
         if [ -d "examples/${CLOUD_PROVIDER}-example" ]; then
           cd "examples/${CLOUD_PROVIDER}-example"
-          terraform init && terraform plan && terraform validate
+          terraform init && terraform validate && terraform plan
           cd ../..
         fi
         
         # Test module
         if [ -d "iac/terraform/${CLOUD_PROVIDER}" ]; then
           cd "iac/terraform/${CLOUD_PROVIDER}"
-          terraform init && terraform fmt -check && terraform validate
+          terraform init && terraform validate && terraform fmt -check
           checkov -d . --framework terraform
           cd ../../..
         fi
