@@ -12,10 +12,13 @@ on:
 jobs:
   quality-check:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
     - uses: actions/checkout@v4
       with:
-        token: ${{ secrets.GITHUB_TOKEN }}
+        token: ${{ secrets.GH_TOKEN }}
         fetch-depth: 0
 
     - name: Install Tools
@@ -87,4 +90,4 @@ jobs:
           --head "$BRANCH_NAME" \
           --label "automated,quality"
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
