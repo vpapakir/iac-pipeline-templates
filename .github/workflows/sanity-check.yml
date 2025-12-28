@@ -1,6 +1,10 @@
 name: Code Quality Check
 
 on:
+  push:
+    branches: ['*']
+  pull_request:
+    branches: [main]
   schedule:
     - cron: '0 2 * * 1'  # Weekly on Monday at 2 AM
   workflow_dispatch:     # Manual trigger
