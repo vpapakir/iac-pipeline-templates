@@ -1,6 +1,6 @@
 # iac-pipeline-templates
 
-Centralized CI/CD pipeline templates implementing the **traffic light system** for cloud-agnostic infrastructure automation across multiple CI/CD platforms.
+Centralized CI/CD pipeline templates implementing the **traffic light system** for cloud-agnostic infrastructure automation across multiple CI/CD platforms..
 
 ## Overview
 
