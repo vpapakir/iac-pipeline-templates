@@ -104,8 +104,15 @@ jobs:
         # Test module
         if [ -d "iac/terraform/${CLOUD_PROVIDER}" ]; then
           cd "iac/terraform/${CLOUD_PROVIDER}"
-          terraform init && terraform validate && terraform fmt -check
-          checkov -d . --framework terraform
+          echo "→ Running terraform init..."
+          terraform init
+          echo "→ Running terraform validate..."
+          terraform validate
+          echo "→ Running terraform fmt -check..."
+          terraform fmt -check
+          echo "→ Running Checkov security scan..."
+          checkov -d . --framework terraform --compact
+          echo "✅ Module validation completed"
           cd ../../..
         fi
 
