@@ -44,10 +44,12 @@ git commit -m "[github] [aws] [aws_pipeline] [release] feat: ready for release"
 
 ```
 iac-pipeline-templates/
+├── .github/workflows/
+│   ├── traffic-light-pipeline.yml    # GitHub Actions reusable workflow
+│   ├── sanity-check.yml              # Automated code quality checks
+│   └── reusable-sanity-check.yml     # Reusable sanity check workflow
 ├── azure/stages/
 │   └── traffic-light-pipeline.yml    # Azure DevOps template
-├── .github/workflows/
-│   └── traffic-light-pipeline.yml    # GitHub Actions reusable workflow
 ├── aws/scripts/
 │   └── traffic-light-pipeline.sh     # AWS CodeBuild script
 ├── oci/scripts/
@@ -56,6 +58,12 @@ iac-pipeline-templates/
 ```
 
 ## Template Features
+
+### Traffic Light Pipeline
+Standardized plan-test-release workflows with intelligent platform routing.
+
+### Automated Code Quality
+Weekly sanity checks with automated formatting, linting, and security analysis.
 
 ### Azure DevOps Template
 **File:** `azure/stages/traffic-light-pipeline.yml`
@@ -163,7 +171,38 @@ phases:
           --repo-name "vpapakir/iac-molecule-compute"
 ```
 
-### OCI DevOps Script
+### Sanity Check Workflow
+**File:** `.github/workflows/reusable-sanity-check.yml`
+
+**Inputs:**
+- `terraform-version` - Terraform version (default: '1.6.0')
+- `create-pr` - Whether to create PR with fixes (default: true)
+
+**Features:**
+- Terraform formatting (`terraform fmt`)
+- Static analysis (TFLint)
+- Security scanning (Checkov, TFSec)
+- Automated PR creation with fixes
+
+**Usage:**
+```yaml
+# .github/workflows/sanity-check.yml
+name: Weekly Sanity Check
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'  # Weekly Monday 3 AM
+  workflow_dispatch:
+
+jobs:
+  sanity-check:
+    uses: vpapakir/iac-pipeline-templates/.github/workflows/reusable-sanity-check.yml@main
+    with:
+      terraform-version: '1.6.0'
+      create-pr: true
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+```
 **File:** `oci/scripts/traffic-light-pipeline.sh`
 
 **Parameters:** Same as AWS script
@@ -305,6 +344,7 @@ git commit -m "[github] [aws] [gh_actions] [release] feat: new compute features"
 ✅ **Multi-Cloud Support** - Test different providers in different CI environments  
 ✅ **Centralized Maintenance** - Update templates to update all projects  
 ✅ **Consistent Behavior** - Same logic across all CI platforms  
+✅ **Automated Code Quality** - Weekly sanity checks with auto-fix PRs  
 
 ## Contributing
 
