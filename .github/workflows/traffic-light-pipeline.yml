@@ -168,6 +168,9 @@ jobs:
     needs: [commit-check, build]
     if: needs.commit-check.outputs.is-release == 'true' && github.ref != 'refs/heads/main'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
     - uses: actions/checkout@v4
     
