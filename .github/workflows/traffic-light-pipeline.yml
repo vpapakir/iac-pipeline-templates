@@ -16,6 +16,18 @@ on:
         required: true
       civo-token:
         required: false
+      oci-tenancy-ocid:
+        required: false
+      oci-user-ocid:
+        required: false
+      oci-fingerprint:
+        required: false
+      oci-private-key:
+        required: false
+      oci-region:
+        required: false
+      oci-compartment-id:
+        required: false
 
 jobs:
   commit-check:
@@ -90,6 +102,12 @@ jobs:
     - name: Validate Terraform
       env:
         CIVO_TOKEN: ${{ secrets.civo-token }}
+        TF_VAR_compartment_id: ${{ secrets.oci-compartment-id }}
+        OCI_TENANCY_OCID: ${{ secrets.oci-tenancy-ocid }}
+        OCI_USER_OCID: ${{ secrets.oci-user-ocid }}
+        OCI_FINGERPRINT: ${{ secrets.oci-fingerprint }}
+        OCI_PRIVATE_KEY: ${{ secrets.oci-private-key }}
+        OCI_REGION: ${{ secrets.oci-region }}
       run: |
         CLOUD_PROVIDER="${{ needs.commit-check.outputs.cloud-provider }}"
         echo "Validating $CLOUD_PROVIDER module..."
