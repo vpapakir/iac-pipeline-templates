@@ -87,8 +87,19 @@ jobs:
     needs: commit-check
     if: needs.commit-check.outputs.should-run == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
     - uses: actions/checkout@v4
+    
+    - name: Cache Terraform
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.terraform.d/
+          **/.terraform/
+        key: terraform-${{ runner.os }}-${{ hashFiles('**/*.tf', '**/.terraform.lock.hcl') }}
+        restore-keys: |
+          terraform-${{ runner.os }}-
     
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@v3
@@ -103,36 +114,55 @@ jobs:
       env:
         CIVO_TOKEN: ${{ secrets.civo-token }}
         TF_VAR_compartment_id: ${{ secrets.oci-compartment-id }}
-        OCI_TENANCY_OCID: ${{ secrets.oci-tenancy-ocid }}
-        OCI_USER_OCID: ${{ secrets.oci-user-ocid }}
-        OCI_FINGERPRINT: ${{ secrets.oci-fingerprint }}
-        OCI_PRIVATE_KEY: ${{ secrets.oci-private-key }}
-        OCI_REGION: ${{ secrets.oci-region }}
+        TF_VAR_tenancy_ocid: ${{ secrets.oci-tenancy-ocid }}
+        TF_VAR_user_ocid: ${{ secrets.oci-user-ocid }}
+        TF_VAR_fingerprint: ${{ secrets.oci-fingerprint }}
+        TF_VAR_private_key: ${{ secrets.oci-private-key }}
+        TF_VAR_region: ${{ secrets.oci-region }}
+        TF_IN_AUTOMATION: "true"
+        TF_INPUT: "false"
       run: |
+        set -euo pipefail  # Fail fast with better error handling
+        
         CLOUD_PROVIDER="${{ needs.commit-check.outputs.cloud-provider }}"
         echo "Validating $CLOUD_PROVIDER module..."
         
         # Test example if exists
         if [ -d "examples/${CLOUD_PROVIDER}-example" ]; then
+          echo "→ Testing example configuration..."
           cd "examples/${CLOUD_PROVIDER}-example"
-          terraform init && terraform validate && terraform plan
+          terraform init -input=false
+          terraform validate
+          terraform plan -input=false -detailed-exitcode || {
+            echo "❌ Terraform plan failed or detected changes"
+            exit 1
+          }
           cd ../..
         fi
         
         # Test module
         if [ -d "iac/terraform/${CLOUD_PROVIDER}" ]; then
+          echo "→ Testing module..."
           cd "iac/terraform/${CLOUD_PROVIDER}"
-          echo "→ Running terraform init..."
-          terraform init
-          echo "→ Running terraform validate..."
+          terraform init -input=false
           terraform validate
-          echo "→ Running terraform fmt -check..."
-          terraform fmt -check
-          echo "→ Running Checkov security scan..."
-          checkov -d . --framework terraform --compact
-          echo "✅ Module validation completed"
+          terraform fmt -check -diff
+          echo "→ Running security scan..."
+          checkov -d . --framework terraform --compact --quiet
           cd ../../..
         fi
+        
+        echo "✅ All validations passed"
+        
+    - name: Upload Terraform Plans
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: terraform-plans-${{ needs.commit-check.outputs.cloud-provider }}
+        path: |
+          **/*.tfplan
+          **/terraform.log
+        retention-days: 7
 
   create-pr:
     needs: [commit-check, build]
