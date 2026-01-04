@@ -1,0 +1,125 @@
+name: Infrastructure Pipeline
+
+on:
+  workflow_call:
+    inputs:
+      ci-tool:
+        required: true
+        type: string
+      terraform-version:
+        required: false
+        type: string
+        default: '1.6.0'
+      workspace-prefix:
+        required: true
+        type: string
+    secrets:
+      terraform-cloud-token:
+        required: true
+
+jobs:
+  commit-check:
+    runs-on: ubuntu-latest
+    outputs:
+      should-run: ${{ steps.check.outputs.should-run }}
+      should-apply: ${{ steps.check.outputs.should-apply }}
+    steps:
+    - name: Parse commit message
+      id: check
+      run: |
+        COMMIT_MSG="${{ github.event.head_commit.message || github.event.pull_request.title }}"
+        if [[ "$COMMIT_MSG" == *"[${{ inputs.ci-tool }}]"* ]]; then
+          echo "should-run=true" >> $GITHUB_OUTPUT
+        else
+          echo "should-run=false" >> $GITHUB_OUTPUT
+        fi
+        
+        if [[ "$COMMIT_MSG" == *"[apply]"* ]]; then
+          echo "should-apply=true" >> $GITHUB_OUTPUT
+        else
+          echo "should-apply=false" >> $GITHUB_OUTPUT
+        fi
+
+  plan:
+    needs: commit-check
+    if: needs.commit-check.outputs.should-run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ inputs.terraform-version }}
+        cli_config_credentials_token: ${{ secrets.terraform-cloud-token }}
+    
+    - name: Plan Dev
+      run: |
+        terraform init -reconfigure
+        terraform plan -detailed-exitcode
+        PLAN_EXIT_CODE=$?
+        if [ $PLAN_EXIT_CODE -eq 0 ]; then
+          echo "✅ No changes detected"
+        elif [ $PLAN_EXIT_CODE -eq 2 ]; then
+          echo "✅ Changes detected - plan successful"
+        else
+          echo "❌ Plan failed"
+          exit $PLAN_EXIT_CODE
+        fi
+      env:
+        TF_WORKSPACE: ${{ inputs.workspace-prefix }}-dev
+
+  dev:
+    needs: [commit-check, plan]
+    if: needs.commit-check.outputs.should-apply == 'true'
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+    - uses: actions/checkout@v4
+    - uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ inputs.terraform-version }}
+        cli_config_credentials_token: ${{ secrets.terraform-cloud-token }}
+    
+    - name: Apply Dev
+      run: |
+        terraform init
+        terraform apply -auto-approve
+      env:
+        TF_WORKSPACE: ${{ inputs.workspace-prefix }}-dev
+
+  staging:
+    needs: [commit-check, dev]
+    if: false
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+    - uses: actions/checkout@v4
+    - uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ inputs.terraform-version }}
+        cli_config_credentials_token: ${{ secrets.terraform-cloud-token }}
+    
+    - name: Apply Staging
+      run: |
+        terraform init
+        terraform apply -auto-approve
+      env:
+        TF_WORKSPACE: ${{ inputs.workspace-prefix }}-staging
+
+  prod:
+    needs: [commit-check, staging]
+    if: false
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+    - uses: actions/checkout@v4
+    - uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ inputs.terraform-version }}
+        cli_config_credentials_token: ${{ secrets.terraform-cloud-token }}
+    
+    - name: Apply Production
+      run: |
+        terraform init
+        terraform apply -auto-approve
+      env:
+        TF_WORKSPACE: ${{ inputs.workspace-prefix }}-prod
