@@ -33,15 +33,11 @@ jobs:
         echo "Previous: $LATEST_TAG, New: $NEW_VERSION"
     
     - name: Create Release
-      uses: actions/create-release@v1
+      run: |
+        gh release create ${{ steps.version.outputs.new-version }} \
+          --title "${{ steps.version.outputs.new-version }}" \
+          --notes "## Changes
+        - Infrastructure pipeline template improvements
+        - Auto-generated release from main branch"
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: ${{ steps.version.outputs.new-version }}
-        release_name: ${{ steps.version.outputs.new-version }}
-        body: |
-          ## Changes
-          - Infrastructure pipeline template improvements
-          - Auto-generated release from main branch
-        draft: false
-        prerelease: false
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
