@@ -1,0 +1,47 @@
+name: Create Release
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Get next version
+      id: version
+      run: |
+        # Get latest tag, default to v0.0.0 if none
+        LATEST_TAG=$(git tag -l "v*" | sort -V | tail -n1)
+        if [ -z "$LATEST_TAG" ]; then
+          LATEST_TAG="v0.0.0"
+        fi
+        
+        # Extract version numbers
+        VERSION=${LATEST_TAG#v}
+        IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+        
+        # Increment patch version
+        PATCH=$((PATCH + 1))
+        NEW_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+        
+        echo "new-version=$NEW_VERSION" >> $GITHUB_OUTPUT
+        echo "Previous: $LATEST_TAG, New: $NEW_VERSION"
+    
+    - name: Create Release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.version.outputs.new-version }}
+        release_name: ${{ steps.version.outputs.new-version }}
+        body: |
+          ## Changes
+          - Infrastructure pipeline template improvements
+          - Auto-generated release from main branch
+        draft: false
+        prerelease: false
