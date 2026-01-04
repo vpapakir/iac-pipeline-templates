@@ -220,5 +220,5 @@ stages:
         git remote set-url origin https://${{ parameters.githubToken }}@github.com/$(Build.Repository.Name).git
         git push origin "v$NEW_VERSION"
         
-        echo "🚀 Published version: v$NEW_VERSION"
+        echo "🚀 Published version: v$NEW_VERSION (Terraform Cloud VCS integration will auto-publish)"
       displayName: 'Publish Module'
