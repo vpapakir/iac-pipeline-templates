@@ -76,7 +76,7 @@ stages:
 - stage: Dev
   displayName: 'Deploy to Development'
   dependsOn: Plan
-  condition: and(succeeded(), eq(stageDependencies.Plan.CommitCheck.outputs['commitCheck.shouldApply'], 'true'))
+  condition: and(succeeded(), eq(dependencies.Plan.outputs['CommitCheck.commitCheck.shouldApply'], 'true'))
   jobs:
   - job: DeployDev
     displayName: 'Apply Dev Environment'
