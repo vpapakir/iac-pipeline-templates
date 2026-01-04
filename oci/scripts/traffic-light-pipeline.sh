@@ -107,7 +107,7 @@ if [[ "$COMMIT_MSG" == *"[release]"* ]] && [[ "$BRANCH_REF" != "main" ]]; then
   curl -X POST \
     -H "Authorization: token $GITHUB_TOKEN" \
     -H "Accept: application/vnd.github.v3+json" \
-    https://api.github.com/repos/$REPO_NAME/pulls \
+    https://api.github.com/repos/"$REPO_NAME"/pulls \
     -d "{
       \"title\": \"Release: ${CLOUD_PROVIDER} module updates\",
       \"body\": \"Automated release PR\\n\\nApprove with: [APPROVED] [PATCH] [$CI_TOOL]\",
@@ -165,7 +165,7 @@ elif [[ "$BRANCH_REF" == "main" ]]; then
   
   # Create and push tag
   git tag -a "v$NEW_VERSION" -m "Release v$NEW_VERSION"
-  git remote set-url origin https://$GITHUB_TOKEN@github.com/$REPO_NAME.git
+  git remote set-url origin https://"$GITHUB_TOKEN"@github.com/"$REPO_NAME".git
   git push origin "v$NEW_VERSION"
   
   echo "🚀 Published version: v$NEW_VERSION"
